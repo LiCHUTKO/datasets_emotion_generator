@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory, session
 import os
 import cv2
 from PIL import Image
@@ -12,16 +12,140 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
+from functools import wraps
+from datetime import timedelta
+import logging
 
-app = Flask(__name__)
+logging.basicConfig(level=logging.DEBUG)
+
+# Replace the serve_static route with Flask's built-in static file handling
+app = Flask(__name__, static_folder='static', template_folder='templates')
 app.secret_key = 'supersecretkey'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 
+# Konfiguracja sesji
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
+
+# Ustaw ścieżkę bazową
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+USERS_DIR = os.path.join(BASE_DIR, "users")
+
+# Upewnij się, że katalog `users` istnieje
+os.makedirs(USERS_DIR, exist_ok=True)
+
+# Dodaj dekorator do sprawdzania autoryzacji
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'username' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+@app.route('/')
+@login_required
+def index():
+    # Generate confusion matrix
+    y_pred = np.argmax(model.predict(val_generator), axis=1)
+    y_true = val_generator.classes
+    cm = confusion_matrix(y_true, y_pred)
+    cmd = ConfusionMatrixDisplay(cm, display_labels=val_generator.class_indices.keys())
+    cmd.plot()
+    plt.title("Confusion Matrix")
+
+    # Ensure the static directory exists
+    static_dir = os.path.join(os.getcwd(), 'static')
+    if not os.path.exists(static_dir):
+        os.makedirs(static_dir)
+
+    plt.savefig(os.path.join(static_dir, 'confusion_matrix.png'))
+    plt.close()  # Close the plot to free memory
+
+    prediction = request.args.get('prediction', '')
+
+    return render_template('index.html', prediction=prediction, username=session.get('username'))
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    app.logger.debug(f"Register route called with method: {request.method}")
+    if request.method == 'GET':
+        app.logger.debug("Rendering register template")
+        return render_template('register.html')
+    
+    # Handle POST request
+    username = request.form.get('username')
+    password = request.form.get('password')
+
+    if not username or not password:
+        return jsonify({"error": "Username and password are required"}), 400
+
+    if not username.isalnum():
+        return jsonify({"error": "Username can only contain letters and numbers"}), 400
+
+    # Create user directory
+    user_dir = os.path.join(USERS_DIR, username)
+    if os.path.exists(user_dir):
+        return jsonify({"error": "User already exists"}), 400
+
+    try:
+        os.makedirs(user_dir)
+        user_file = os.path.join(user_dir, "user.txt")
+
+        # Save user data
+        with open(user_file, 'w') as f:
+            f.write(f"Username:{username}\nPassword:{password}")
+
+        return jsonify({"message": "Registration successful"}), 200
+    except Exception as e:
+        return jsonify({"error": f"Registration failed: {str(e)}"}), 500
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'GET':
+        return render_template('login.html')
+    
+    username = request.form.get('username')
+    password = request.form.get('password')
+
+    if not username or not password:
+        return jsonify({"error": "Username and password are required"}), 400
+
+    user_dir = os.path.join(USERS_DIR, username)
+    user_file = os.path.join(user_dir, "user.txt")
+
+    if not os.path.exists(user_file):
+        return jsonify({"error": "User does not exist"}), 404
+
+    # Odczyt danych użytkownika
+    with open(user_file, 'r') as f:
+        stored_password = f.readlines()[1].split(":")[1].strip()
+
+    if stored_password != password:
+        return jsonify({"error": "Invalid password"}), 400
+
+    session['username'] = username
+    return jsonify({"message": "Login successful"}), 200
+
+@app.route('/logout')
+def logout():
+    session.pop('username', None)
+    return redirect(url_for('login'))
+
+@app.route('/predict', methods=['POST'])
+@login_required
+def predict():
+    if 'text' in request.form:
+        text = request.form['text']
+        # Tutaj dodaj logikę przewidywania dla tekstu
+        predictions = [{"emotion": "happy", "probability": 0.8}]  # Przykład
+        return jsonify({"predictions": predictions})
+    return jsonify({"error": "No text provided"}), 400
+
 # Define paths
-train_dir = r"C:\Users\klesz\Desktop\emotion_detection-main\emotion_detection-main\emotions\trening"
-val_dir = r"C:\Users\klesz\Desktop\emotion_detection-main\emotion_detection-main\emotions\walidacja"
-test_dir = r"C:\Users\klesz\Desktop\emotion_detection-main\emotion_detection-main\emotions"
-model_path = r"C:\Users\klesz\Desktop\emotion_detection-main\emotion_detection-main\emotion_detection_model_face.h5"
+train_dir = r"emotions\trening"
+val_dir = r"emotions\walidacja"
+test_dir = r"emotion_detection-main\emotions"
+model_path = r"emotion_detection_model_face.h5"
 
 # Hyperparameters
 batch_size = 64
@@ -117,29 +241,8 @@ def predict_emotion(model, img_array):
     top_emotions = [(list(train_generator.class_indices.keys())[i], prediction[i]) for i in top_indices]
     return top_emotions
 
-@app.route('/')
-def index():
-    # Generate confusion matrix
-    y_pred = np.argmax(model.predict(val_generator), axis=1)
-    y_true = val_generator.classes
-    cm = confusion_matrix(y_true, y_pred)
-    cmd = ConfusionMatrixDisplay(cm, display_labels=val_generator.class_indices.keys())
-    cmd.plot()
-    plt.title("Confusion Matrix")
-
-    # Ensure the static directory exists
-    static_dir = os.path.join(os.getcwd(), 'static')
-    if not os.path.exists(static_dir):
-        os.makedirs(static_dir)
-
-    plt.savefig(os.path.join(static_dir, 'confusion_matrix.png'))
-    plt.close()  # Close the plot to free memory
-
-    prediction = request.args.get('prediction', '')
-
-    return render_template('index.html', prediction=prediction)
-
 @app.route('/train', methods=['POST'])
+@login_required
 def train_model():
     early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
     reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6)
@@ -156,6 +259,7 @@ def train_model():
     return redirect(url_for('index'))
 
 @app.route('/upload', methods=['POST'])
+@login_required
 def upload_and_predict():
     if 'file' not in request.files:
         flash('No file part', 'danger')
@@ -175,7 +279,19 @@ def upload_and_predict():
     flash('File upload failed', 'danger')
     return redirect(url_for('index'))
 
+@app.errorhandler(404)
+def not_found_error(error):
+    return render_template('404.html'), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return render_template('500.html'), 500
+
 if __name__ == '__main__':
-    if not os.path.exists(app.config['UPLOAD_FOLDER']):
-        os.makedirs(app.config['UPLOAD_FOLDER'])
-    app.run(debug=True)
+    # Create required directories
+    for directory in ['static', 'templates', 'uploads', 'users']:
+        os.makedirs(directory, exist_ok=True)
+    
+    # Enable debug mode
+    app.debug = True
+    app.run(host='0.0.0.0', port=5000)
