@@ -4,6 +4,13 @@ import cv2
 from PIL import Image
 import numpy as np
 import tensorflow as tf
+import random
+
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
+
 from tensorflow.keras.preprocessing import image
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.models import Sequential
@@ -16,7 +23,9 @@ from functools import wraps
 from datetime import timedelta
 import logging
 
-logging.basicConfig(level=logging.DEBUG)
+# Configure logging to exclude PIL debug messages
+logging.basicConfig(level=logging.INFO)
+logging.getLogger('PIL').setLevel(logging.INFO)
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'
@@ -134,11 +143,31 @@ def predict():
         return jsonify({"predictions": predictions})
     return jsonify({"error": "No text provided"}), 400
 
-# Define paths
-train_dir = r"emotions\trening"
-val_dir = r"emotions\walidacja"
-test_dir = r"emotion_detection-main\emotions"
-model_path = r"emotion_detection_model_face.h5"
+# Update paths to be relative to the application directory
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TRAIN_DIR = os.path.join(BASE_DIR, "emotions", "trening")
+VAL_DIR = os.path.join(BASE_DIR, "emotions", "walidacja")
+TEST_DIR = os.path.join(BASE_DIR, "emotions", "test")
+MODEL_DIR = os.path.join(BASE_DIR, "models")
+MODEL_PATH = os.path.join(MODEL_DIR, "emotion_detection_model.h5")
+
+# Replace the existing path definitions with these new variables
+train_dir = TRAIN_DIR
+val_dir = VAL_DIR
+test_dir = TEST_DIR
+model_path = MODEL_PATH
+
+def ensure_directories():
+    """Ensure all required directories exist"""
+    directories = [
+        os.path.join(BASE_DIR, 'static'),
+        os.path.join(BASE_DIR, 'templates'),
+        os.path.join(BASE_DIR, 'uploads'),
+        os.path.join(BASE_DIR, 'users'),
+        MODEL_DIR
+    ]
+    for directory in directories:
+        os.makedirs(directory, exist_ok=True)
 
 # Hyperparameters
 batch_size = 64
@@ -204,12 +233,14 @@ def create_model():
 
 def load_or_create_model():
     try:
-        if os.path.exists(model_path):
-            print("Loading model from disk.")
-            model = tf.keras.models.load_model(model_path)
-            model.compile(optimizer=Adam(learning_rate=learning_rate),
-                          loss='categorical_crossentropy',
-                          metrics=['accuracy'])
+        if os.path.exists(MODEL_PATH):
+            print(f"Loading model from: {MODEL_PATH}")
+            model = tf.keras.models.load_model(MODEL_PATH)
+            model.compile(
+                optimizer=Adam(learning_rate=learning_rate),
+                loss='categorical_crossentropy',
+                metrics=['accuracy']
+            )
             return model
         else:
             print("No pre-trained model found. Creating a new one.")
@@ -237,18 +268,30 @@ def predict_emotion(model, img_array):
 @app.route('/train', methods=['POST'])
 @login_required
 def train_model():
+    if not os.path.exists(TRAIN_DIR) or not os.path.exists(VAL_DIR):
+        flash('Training and validation directories not found!', 'danger')
+        return redirect(url_for('index'))
+
     early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
     reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6)
 
-    history = model.fit(
-        train_generator,
-        epochs=epochs,
-        validation_data=val_generator,
-        callbacks=[early_stopping, reduce_lr]
-    )
+    try:
+        history = model.fit(
+            train_generator,
+            epochs=epochs,
+            validation_data=val_generator,
+            callbacks=[early_stopping, reduce_lr]
+        )
 
-    model.save(model_path)
-    flash('Model trained and saved successfully!', 'success')
+        # Ensure model directory exists
+        os.makedirs(MODEL_DIR, exist_ok=True)
+        
+        # Save the model
+        model.save(MODEL_PATH)
+        flash('Model trained and saved successfully!', 'success')
+    except Exception as e:
+        flash(f'Error during training: {str(e)}', 'danger')
+    
     return redirect(url_for('index'))
 
 @app.route('/upload', methods=['POST'])
@@ -281,9 +324,8 @@ def internal_error(error):
     return render_template('500.html'), 500
 
 if __name__ == '__main__':
-    # Create required directories
-    for directory in ['static', 'templates', 'uploads', 'users']:
-        os.makedirs(directory, exist_ok=True)
+    # Ensure all required directories exist
+    ensure_directories()
     
     # Enable debug mode
     app.debug = True
