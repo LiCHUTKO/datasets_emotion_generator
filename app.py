@@ -18,22 +18,15 @@ import logging
 
 logging.basicConfig(level=logging.DEBUG)
 
-# Replace the serve_static route with Flask's built-in static file handling
-app = Flask(__name__, static_folder='static', template_folder='templates')
+app = Flask(__name__)
 app.secret_key = 'supersecretkey'
 app.config['UPLOAD_FOLDER'] = 'uploads'
-
-# Konfiguracja sesji
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
 
-# Ustaw ścieżkę bazową
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 USERS_DIR = os.path.join(BASE_DIR, "users")
-
-# Upewnij się, że katalog `users` istnieje
 os.makedirs(USERS_DIR, exist_ok=True)
 
-# Dodaj dekorator do sprawdzania autoryzacji
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
