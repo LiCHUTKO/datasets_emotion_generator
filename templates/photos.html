@@ -101,45 +101,97 @@
     <!-- Przyciski emocji -->
     <div class="emotion-buttons">
         <div class="row">
-            <button id="anger-btn" class="btn">Anger</button>
-            <button id="contempt-btn" class="btn">Contempt</button>
+            {% for prediction in predictions[0][:2] %}
+                <button class="btn" 
+                        style="width: 45%; background-color: rgba({{ prediction.probability * 255 }}, 0, 0, {{ prediction.probability }})">
+                    {{ prediction.emotion }} ({{ "%.2f"|format(prediction.probability * 100) }}%)
+                </button>
+            {% endfor %}
         </div>
         <div class="row">
-            <button id="disgust-btn" class="btn">Disgust</button>
-            <button id="fear-btn" class="btn">Fear</button>
-            <button id="happy-btn" class="btn">Happy</button>
+            {% for prediction in predictions[0][2:5] %}
+                <button class="btn" 
+                        style="width: 30%; background-color: rgba({{ prediction.probability * 255 }}, 0, 0, {{ prediction.probability }})">
+                    {{ prediction.emotion }} ({{ "%.2f"|format(prediction.probability * 100) }}%)
+                </button>
+            {% endfor %}
         </div>
         <div class="row">
-            <button id="neutral-btn" class="btn">Neutral</button>
-            <button id="sad-btn" class="btn">Sad</button>
-            <button id="surprise-btn" class="btn">Surprise</button>
+            {% for prediction in predictions[0][5:] %}
+                <button class="btn" 
+                        style="width: 30%; background-color: rgba({{ prediction.probability * 255 }}, 0, 0, {{ prediction.probability }})">
+                    {{ prediction.emotion }} ({{ "%.2f"|format(prediction.probability * 100) }}%)
+                </button>
+            {% endfor %}
         </div>
     </div>
 
     <script>
-        const photos = {{ photos | safe }};
+        const photos = {{ photos|tojson|safe }};
+        const predictions = {{ predictions|tojson|safe }};
+        const username = "{{ username }}";
         let currentIndex = 0;
 
         function displayPhoto() {
             const photoDisplay = document.getElementById('photo-display');
-            if (photos.length > 0) {
-                photoDisplay.src = `/uploads/photos/${photos[currentIndex]}`;
+            if (photos && photos.length > 0) {
+                const photoUrl = `/users/${username}/photos/${photos[currentIndex]}`;
+                photoDisplay.src = photoUrl;
                 photoDisplay.alt = `Photo ${currentIndex + 1} of ${photos.length}`;
-            } else {
-                photoDisplay.src = '';
-                photoDisplay.alt = 'No photos available';
+                updateEmotionButtons(predictions[currentIndex]);
             }
         }
 
+        function updateEmotionButtons(currentPredictions) {
+            const emotionButtons = document.querySelector('.emotion-buttons');
+            emotionButtons.innerHTML = '';
+
+            // First row (2 buttons)
+            const row1 = document.createElement('div');
+            row1.className = 'row';
+            currentPredictions.slice(0, 2).forEach(pred => {
+                const button = createEmotionButton(pred, '45%');
+                row1.appendChild(button);
+            });
+            emotionButtons.appendChild(row1);
+
+            // Second row (3 buttons)
+            const row2 = document.createElement('div');
+            row2.className = 'row';
+            currentPredictions.slice(2, 5).forEach(pred => {
+                const button = createEmotionButton(pred, '30%');
+                row2.appendChild(button);
+            });
+            emotionButtons.appendChild(row2);
+
+            // Third row (remaining buttons)
+            const row3 = document.createElement('div');
+            row3.className = 'row';
+            currentPredictions.slice(5).forEach(pred => {
+                const button = createEmotionButton(pred, '30%');
+                row3.appendChild(button);
+            });
+            emotionButtons.appendChild(row3);
+        }
+
+        function createEmotionButton(prediction, width) {
+            const button = document.createElement('button');
+            button.className = 'btn';
+            button.style.width = width;
+            button.style.backgroundColor = `rgba(${prediction.probability * 255}, 0, 0, ${prediction.probability})`;
+            button.textContent = `${prediction.emotion} (${(prediction.probability * 100).toFixed(2)}%)`;
+            return button;
+        }
+
         function showPrevious() {
-            if (photos.length > 0) {
+            if (photos && photos.length > 0) {
                 currentIndex = (currentIndex - 1 + photos.length) % photos.length;
                 displayPhoto();
             }
         }
 
         function showNext() {
-            if (photos.length > 0) {
+            if (photos && photos.length > 0) {
                 currentIndex = (currentIndex + 1) % photos.length;
                 displayPhoto();
             }
@@ -181,7 +233,12 @@
         document.getElementById('sad-btn').onclick = () => setEmotionColor('sad');
         document.getElementById('surprise-btn').onclick = () => setEmotionColor('surprise');
 
+        // Call displayPhoto immediately when DOM is loaded
+        document.addEventListener('DOMContentLoaded', displayPhoto);
+        // Backup call
         window.onload = displayPhoto;
+        // Immediate call
+        displayPhoto();
     </script>
 </body>
 </html>

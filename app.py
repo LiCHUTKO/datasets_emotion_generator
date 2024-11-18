@@ -177,29 +177,40 @@ def upload_and_predict():
         flash('No file part', 'danger')
         return redirect(url_for('index'))
     
-    file = request.files['file']
+    files = request.files.getlist('file')  # Changed to getlist
+    uploaded_files = []
+    predictions_list = []
     
-    if file.filename == '':
-        flash('No selected file', 'danger')
-        return redirect(url_for('index'))
+    user_folder = os.path.join(USERS_DIR, session['username'], 'photos')
+    os.makedirs(user_folder, exist_ok=True)
     
-    if file:
-        # Get user folder path
-        user_folder = os.path.join(USERS_DIR, session['username'], 'photos')
-        os.makedirs(user_folder, exist_ok=True)
-        
-        file_path = os.path.join(user_folder, file.filename)
-        file.save(file_path)
-        
-        # Process and analyze the image
-        img_array = preprocess_image(file_path)
-        top_emotions = predict_emotion(model, img_array)
-        emotion_message = f"Predicted emotions: {top_emotions[0][0]} ({top_emotions[0][1]*100:.2f}%), {top_emotions[1][0]} ({top_emotions[1][1]*100:.2f}%)"
-        flash(emotion_message, 'success')
-        
-        return render_template('photos.html', photos=[file.filename])
+    for file in files:
+        if file.filename != '':
+            file_path = os.path.join(user_folder, file.filename)
+            file.save(file_path)
+            uploaded_files.append(file.filename)
+            
+            # Get predictions for this image
+            img_array = preprocess_image(file_path)
+            predictions = model.predict(img_array)[0]
+            
+            # Sort emotions by probability
+            emotions = list(train_generator.class_indices.keys())
+            emotion_predictions = [
+                {"emotion": emotion, "probability": float(prob)}
+                for emotion, prob in zip(emotions, predictions)
+            ]
+            # Sort by probability in descending order
+            emotion_predictions.sort(key=lambda x: x["probability"], reverse=True)
+            predictions_list.append(emotion_predictions)
     
-    flash('File upload failed', 'danger')
+    if uploaded_files:
+        return render_template('photos.html',
+                             username=session.get('username'),
+                             photos=uploaded_files,
+                             predictions=predictions_list)
+    
+    flash('No files were uploaded', 'warning')
     return redirect(url_for('index'))
 
 @app.route('/upload_multiple', methods=['POST'])
@@ -232,6 +243,13 @@ def upload_multiple_images():
 @login_required
 def photos():
     return render_template('photos.html', username=session.get('username'))
+
+@app.route('/users/<username>/photos/<filename>')
+@login_required
+def user_photo(username, filename):
+    if username != session.get('username'):
+        return redirect(url_for('login'))
+    return send_from_directory(os.path.join(USERS_DIR, username, 'photos'), filename)
 
 # Update paths to be relative to the application directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
