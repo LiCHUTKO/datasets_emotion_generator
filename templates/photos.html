@@ -189,6 +189,12 @@
             button.style.width = width;
             button.style.backgroundColor = `rgba(${prediction.probability * 255}, 0, 0, ${prediction.probability})`;
             button.textContent = `${prediction.emotion} (${(prediction.probability * 100).toFixed(2)}%)`;
+            
+            // Add click event listener
+            button.onclick = function() {
+                moveToEmotionFolder(photos[currentIndex], prediction.emotion);
+            };
+            
             return button;
         }
 
@@ -251,22 +257,49 @@
 
         // Add function to handle image classification
         function moveToEmotionFolder(filename, emotion) {
-            // Store classification
-            classifications.push({
-                filename: filename,
-                emotion: emotion
+            console.log(`Moving ${filename} to ${emotion} folder`);
+            
+            fetch('/classify_image', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    filename: filename,
+                    emotion: emotion
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Server response:', data);
+                if (data.success) {
+                    // Store classification
+                    classifications.push({
+                        filename: filename,
+                        emotion: emotion
+                    });
+                    
+                    // Remove current photo from arrays
+                    photos.splice(currentIndex, 1);
+                    predictions.splice(currentIndex, 1);
+                    
+                    if (photos.length === 0) {
+                        // All photos classified, go back to home
+                        window.location.href = '/';
+                    } else {
+                        // Show next photo
+                        currentIndex = currentIndex >= photos.length ? photos.length - 1 : currentIndex;
+                        displayPhoto();
+                    }
+                } else {
+                    console.error('Error:', data.error);
+                    alert('Failed to move image: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Failed to classify image');
             });
-            
-            // Update UI as before
-            photos.splice(currentIndex, 1);
-            predictions.splice(currentIndex, 1);
-            
-            if (photos.length === 0) {
-                window.location.href = '/';
-            } else {
-                currentIndex = currentIndex >= photos.length ? photos.length - 1 : currentIndex;
-                displayPhoto();
-            }
         }
 
         function acceptAllClassifications() {
