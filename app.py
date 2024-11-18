@@ -6,6 +6,7 @@ import numpy as np
 import tensorflow as tf
 import random
 import shutil
+import time
 
 SEED = 42
 random.seed(SEED)
@@ -94,6 +95,65 @@ def generate_confusion_matrix():
         flash(f'Error generating confusion matrix: {str(e)}', 'warning')
         return redirect(url_for('index'))
 
+def create_user_dataset_structure(username):
+    """Create dataset folders for user"""
+    emotions = ['happy', 'sad', 'angry', 'disgust', 'fear', 'surprise', 'neutral', 'contempt']
+    user_dataset = os.path.join(USERS_DIR, username, 'dataset')
+    
+    for emotion in emotions:
+        emotion_dir = os.path.join(user_dataset, emotion)
+        os.makedirs(emotion_dir, exist_ok=True)
+
+@app.route('/classify_image', methods=['POST'])
+def classify_image():
+    try:
+        data = request.get_json()
+        filename = data.get('filename')
+        emotion = data.get('emotion')
+        username = session.get('username')
+
+        # Add debug logging
+        print(f"Received request: filename={filename}, emotion={emotion}, username={username}")
+
+        if not all([filename, emotion, username]):
+            return jsonify({'success': False, 'error': 'Missing parameters'})
+
+        # Source path from photos folder
+        source_path = os.path.join(USERS_DIR, username, 'photos', filename)
+        print(f"Source path: {source_path}")
+        
+        if not os.path.exists(source_path):
+            return jsonify({'success': False, 'error': f'Source file not found: {source_path}'})
+
+        # Target path in dataset folder
+        target_dir = os.path.join(USERS_DIR, username, 'dataset', emotion.lower())
+        os.makedirs(target_dir, exist_ok=True)
+        print(f"Target directory: {target_dir}")
+
+        # Create unique filename
+        base, ext = os.path.splitext(filename)
+        target_filename = f"{base}_{int(time.time())}{ext}"
+        target_path = os.path.join(target_dir, target_filename)
+        print(f"Target path: {target_path}")
+
+        # Move file with explicit error handling
+        try:
+            shutil.move(source_path, target_path)
+            print(f"File moved successfully from {source_path} to {target_path}")
+        except Exception as move_error:
+            print(f"Error moving file: {str(move_error)}")
+            return jsonify({'success': False, 'error': f'Failed to move file: {str(move_error)}'})
+
+        return jsonify({
+            'success': True,
+            'message': f'Image moved to {emotion} folder',
+            'new_path': target_path
+        })
+
+    except Exception as e:
+        print(f"Error in classify_image: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)})
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     app.logger.debug(f"Register route called with method: {request.method}")
@@ -119,7 +179,10 @@ def register():
     try:
         os.makedirs(user_dir)
         user_file = os.path.join(user_dir, "user.txt")
-
+        
+        # Create dataset structure
+        create_user_dataset_structure(username)
+        
         # Save user data
         with open(user_file, 'w') as f:
             f.write(f"Username:{username}\nPassword:{password}")
@@ -401,6 +464,53 @@ def train_model():
         flash(f'Error during training: {str(e)}', 'danger')
     
     return redirect(url_for('index'))
+
+@app.route('/classify_all_images', methods=['POST'])
+def classify_all_images():
+    try:
+        data = request.get_json()
+        classifications = data.get('classifications', [])
+        username = session.get('username')
+
+        if not username or not classifications:
+            return jsonify({'success': False, 'error': 'Invalid request'})
+
+        results = []
+        for item in classifications:
+            filename = item.get('filename')
+            emotion = item.get('emotion')
+            
+            source_path = os.path.join(USERS_DIR, username, 'photos', filename)
+            target_dir = os.path.join(USERS_DIR, username, 'dataset', emotion.lower())
+            os.makedirs(target_dir, exist_ok=True)
+
+            base, ext = os.path.splitext(filename)
+            target_filename = f"{base}_{int(time.time())}{ext}"
+            target_path = os.path.join(target_dir, target_filename)
+
+            try:
+                shutil.move(source_path, target_path)
+                results.append({
+                    'filename': filename,
+                    'success': True
+                })
+            except Exception as e:
+                results.append({
+                    'filename': filename,
+                    'success': False,
+                    'error': str(e)
+                })
+
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
 
 @app.errorhandler(404)
 def not_found_error(error):

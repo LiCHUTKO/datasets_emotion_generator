@@ -103,6 +103,7 @@
         <div class="row">
             {% for prediction in predictions[0][:2] %}
                 <button class="btn" 
+                        onclick="moveToEmotionFolder('{{ photos[currentIndex] }}', '{{ prediction.emotion }}')"
                         style="width: 45%; background-color: rgba({{ prediction.probability * 255 }}, 0, 0, {{ prediction.probability }})">
                     {{ prediction.emotion }} ({{ "%.2f"|format(prediction.probability * 100) }}%)
                 </button>
@@ -126,11 +127,19 @@
         </div>
     </div>
 
+    <!-- Add this button after the emotion buttons -->
+    <div class="text-center mt-4">
+        <button onclick="acceptAllClassifications()" class="btn btn-success btn-lg">
+            Accept All Classifications
+        </button>
+    </div>
+
     <script>
         const photos = {{ photos|tojson|safe }};
         const predictions = {{ predictions|tojson|safe }};
         const username = "{{ username }}";
         let currentIndex = 0;
+        const classifications = [];
 
         function displayPhoto() {
             const photoDisplay = document.getElementById('photo-display');
@@ -239,6 +248,55 @@
         window.onload = displayPhoto;
         // Immediate call
         displayPhoto();
+
+        // Add function to handle image classification
+        function moveToEmotionFolder(filename, emotion) {
+            // Store classification
+            classifications.push({
+                filename: filename,
+                emotion: emotion
+            });
+            
+            // Update UI as before
+            photos.splice(currentIndex, 1);
+            predictions.splice(currentIndex, 1);
+            
+            if (photos.length === 0) {
+                window.location.href = '/';
+            } else {
+                currentIndex = currentIndex >= photos.length ? photos.length - 1 : currentIndex;
+                displayPhoto();
+            }
+        }
+
+        function acceptAllClassifications() {
+            if (classifications.length === 0) {
+                alert('No images classified yet!');
+                return;
+            }
+
+            fetch('/classify_all_images', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    classifications: classifications
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    window.location.href = '/';
+                } else {
+                    alert('Error moving files: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Failed to process classifications');
+            });
+        }
     </script>
 </body>
 </html>
